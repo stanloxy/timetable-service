@@ -22,8 +22,7 @@ class AppContext:
     clock: AdjustableClock
     broker_probe: BrokerProbe
     jobs: JobRegistry = field(default_factory=JobRegistry)
-    # POST /__test/reset: очистка данных и повторный seed. В каркасе не задан (ответ 501),
-    # реализация появляется вместе с моделями и загрузчиком seed (src/app/seed.py).
+    # POST /__test/reset: callback очистки и восстановления seed подключается в build_context.
     reset_state: Callable[[], Awaitable[None]] | None = None
 
 

@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.db.models import Group, Lesson
+from app.enums.lessons import LessonFormat, LessonStatus
 from tests.integration.db.helpers import make_successor
 
 
@@ -42,8 +43,8 @@ async def test_concurrent_successors(
         group_id=group_id,
         instructor_id=UUID("1b000000-0000-4000-8000-000000000001"),
         classroom_id=None,
-        status="RESCHEDULED",
-        format="ONLINE",
+        status=LessonStatus.RESCHEDULED,
+        format=LessonFormat.ONLINE,
         starts_at=starts_at,
         ends_at=starts_at + timedelta(hours=1),
         rescheduled_from_id=None,

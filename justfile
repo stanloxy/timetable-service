@@ -107,6 +107,23 @@ test-db-ps:
 test-db-migrate:
     @uv run python tools/test_db.py upgrade head
 
+# Загрузить seed в тестовую БД
+test-db-seed:
+    @uv run python tools/test_db.py --seed
+
+# Запустить приложение в тестовом режиме с тестовой PostgreSQL
+test-app:
+    @uv run python tools/test_db.py --serve
+
+# Собрать образ для проверки контейнерного entrypoint
+test-container-build:
+    @docker compose --env-file .env.test -f compose.test.yml -p timetable-service-test build app-check
+
+# Выполнить entrypoint с выбранным SEED_ON_START, затем завершить контейнер
+test-container-start seed_on_start:
+    @test "$1" = "0" || test "$1" = "1"
+    @docker compose --env-file .env.test -f compose.test.yml -p timetable-service-test run --rm -e SEED_ON_START="$1" app-check python -c "print('Entrypoint completed')"
+
 # Создать ревизию по моделям и тестовой БД; новую ревизию НЕ применяет
 test-db-migration message:
     @uv run python tools/test_db.py revision --autogenerate -m "$1"
@@ -121,7 +138,7 @@ migration message:
 
 # Загрузить seed в БД контейнера app
 seed:
-    docker compose exec app python -m app.seed
+    docker compose exec app python -m app.maintenance.seed
 
 # Модульные тесты (аргументы передаются pytest)
 test *args:

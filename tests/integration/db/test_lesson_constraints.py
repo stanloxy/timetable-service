@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Lesson
+from app.enums.lessons import LessonFormat, LessonStatus
 
 
 @pytest.mark.parametrize("minutes", [30, 480])
@@ -50,7 +51,7 @@ async def test_format_classroom_consistency(
     has_classroom: bool,
     allowed: bool,
 ) -> None:
-    lesson.format = lesson_format
+    lesson.format = LessonFormat(lesson_format)
     lesson.classroom_id = UUID("2c000000-0000-4000-8000-000000000001") if has_classroom else None
     db_session.add(lesson)
 
@@ -79,7 +80,7 @@ async def test_accept_allowed_status(
     lesson: Lesson,
     status: str,
 ) -> None:
-    lesson.status = status
+    lesson.status = LessonStatus(status)
     db_session.add(lesson)
     await db_session.flush()
 
@@ -104,3 +105,19 @@ async def test_reject_unknown_enum_value(
         await db_session.flush()
 
     assert constraint in str(error.value.orig)
+
+
+async def test_read_returns_python_enums(
+    db_session: AsyncSession,
+    lesson: Lesson,
+) -> None:
+    lesson_id = lesson.id
+    db_session.add(lesson)
+    await db_session.flush()
+    db_session.expunge_all()
+
+    saved = await db_session.get(Lesson, lesson_id)
+
+    assert saved is not None
+    assert saved.status is LessonStatus.PLANNED
+    assert saved.format is LessonFormat.ONLINE

@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Lesson
+from app.enums.lessons import LessonStatus
 
 
 def make_successor(original: Lesson, successor_id: UUID) -> Lesson:
@@ -13,7 +14,7 @@ def make_successor(original: Lesson, successor_id: UUID) -> Lesson:
         group_id=original.group_id,
         instructor_id=original.instructor_id,
         classroom_id=original.classroom_id,
-        status="PLANNED",
+        status=LessonStatus.PLANNED,
         format=original.format,
         starts_at=original.starts_at + timedelta(days=1),
         ends_at=original.ends_at + timedelta(days=1),

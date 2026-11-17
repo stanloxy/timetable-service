@@ -11,9 +11,11 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
 )
+from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.enums.lessons import LessonFormat, LessonStatus
 
 
 class Lesson(Base):
@@ -48,8 +50,26 @@ class Lesson(Base):
     )
     instructor_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     classroom_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    format: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[LessonStatus] = mapped_column(
+        SqlEnum(
+            LessonStatus,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=False,
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
+        nullable=False,
+    )
+    format: Mapped[LessonFormat] = mapped_column(
+        SqlEnum(
+            LessonFormat,
+            native_enum=False,
+            create_constraint=False,
+            validate_strings=False,
+            values_callable=lambda enum: [member.value for member in enum],
+        ),
+        nullable=False,
+    )
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     rescheduled_from_id: Mapped[UUID | None] = mapped_column(

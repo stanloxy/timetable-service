@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Group, Lesson
+from app.enums.lessons import LessonFormat, LessonStatus
 
 
 @pytest.fixture
@@ -20,8 +21,8 @@ async def lesson(db_session: AsyncSession) -> Lesson:
         group_id=group_id,
         instructor_id=UUID("1b000000-0000-4000-8000-000000000001"),
         classroom_id=None,
-        status="PLANNED",
-        format="ONLINE",
+        status=LessonStatus.PLANNED,
+        format=LessonFormat.ONLINE,
         starts_at=starts_at,
         ends_at=starts_at + timedelta(hours=1),
         rescheduled_from_id=None,

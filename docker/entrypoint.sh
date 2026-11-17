@@ -7,8 +7,8 @@ echo "[entrypoint] alembic upgrade head"
 alembic upgrade head
 
 if [ "${SEED_ON_START:-0}" = "1" ]; then
-    echo "[entrypoint] SEED_ON_START=1: python -m app.seed"
-    python -m app.seed
+    echo "[entrypoint] SEED_ON_START=1: python -m app.maintenance.seed"
+    python -m app.maintenance.seed
 fi
 
 exec "$@"

@@ -1,4 +1,4 @@
-"""Запуск Alembic с подключением только из локального .env.test."""
+"""Запуск Alembic, seed или приложения с подключением тестовой БД из .env.test."""
 
 import os
 import sys
@@ -51,7 +51,7 @@ def load_test_database_url() -> URL:
 
 
 def main() -> int:
-    """Передать аргументы Alembic без вывода строки подключения."""
+    """Запустить выбранную команду без вывода строки подключения."""
     try:
         url = load_test_database_url()
     except ValueError as error:
@@ -60,6 +60,31 @@ def main() -> int:
     environment = os.environ.copy()
     environment["DATABASE_URL"] = url.render_as_string(hide_password=False)
     os.chdir(REPO_ROOT)
+
+    if sys.argv[1:] == ["--seed"]:
+        os.execvpe(
+            sys.executable,
+            [sys.executable, "-m", "app.maintenance.seed"],
+            environment,
+        )
+
+    if sys.argv[1:] == ["--serve"]:
+        environment["TEST_MODE"] = "1"
+        os.execvpe(
+            sys.executable,
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "app.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8001",
+            ],
+            environment,
+        )
+
     os.execvpe("alembic", ["alembic", *sys.argv[1:]], environment)
 
 
