@@ -1,6 +1,6 @@
 """Окружение Alembic (каталог migrations/).
 
-Асинхронный движок, URL из настроек приложения, metadata из ``app.db.Base``. Чтобы autogenerate
+Асинхронный движок, URL из настроек приложения, metadata из ``app.db.base.Base``. Чтобы autogenerate
 видел таблицы, модули с моделями должны быть импортированы до чтения ``Base.metadata`` — добавьте
 импорт в отмеченной точке расширения ниже.
 """
@@ -12,17 +12,17 @@ from alembic import context
 from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.db import Base
+from app.db import models as models  # Регистрирует таблицы в Base.metadata.
+from app.db.base import Base
 from app.settings import get_settings
 
-# ---> точка расширения: импортируйте модули с ORM-классами, чтобы они зарегистрировались
-# в Base.metadata, например: from app import models
+# Импорт пакета регистрирует все ORM-модели в общей metadata.
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 

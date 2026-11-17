@@ -77,6 +77,42 @@ ps:
 migrate:
     docker compose exec app alembic upgrade head
 
+# Создать локальные настройки тестовой БД; существующий файл не перезаписывается
+test-db-init:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    umask 077
+    if [[ -e .env.test ]]; then
+        echo '.env.test уже существует; файл оставлен без изменений'
+        exit 0
+    fi
+    password="$(openssl rand -hex 32)"
+    set -o noclobber
+    printf 'TEST_POSTGRES_USER=wa_test\nTEST_POSTGRES_DB=wa_wp01_test\nTEST_POSTGRES_PORT=55433\nTEST_POSTGRES_PASSWORD=%s\n' "$password" > .env.test
+    echo 'Создан .env.test с правами 600; пароль не выводится'
+
+# Поднять отдельную временную PostgreSQL и дождаться готовности
+test-db-up:
+    @docker compose --env-file .env.test -f compose.test.yml -p timetable-service-test up -d --wait
+
+# Остановить тестовую PostgreSQL и удалить контейнер; её данные будут потеряны
+test-db-down:
+    @docker compose --env-file .env.test -f compose.test.yml -p timetable-service-test down
+
+# Посмотреть состояние только тестовой PostgreSQL
+test-db-ps:
+    @docker compose --env-file .env.test -f compose.test.yml -p timetable-service-test ps
+
+# Применить существующие миграции только к тестовой БД
+test-db-migrate:
+    @uv run python tools/test_db.py upgrade head
+
+# Создать ревизию по моделям и тестовой БД; новую ревизию НЕ применяет
+test-db-migration message:
+    @uv run python tools/test_db.py revision --autogenerate -m "$1"
+    uv run ruff format migrations/versions
+    uv run ruff check --fix migrations/versions
+
 # Создать миграцию autogenerate при поднятом стеке: just migration "create lessons"
 migration message:
     DATABASE_URL="${HOST_DATABASE_URL:-postgresql+asyncpg://wa:wa@localhost:5432/wa}" uv run alembic revision --autogenerate -m "$1"
@@ -90,6 +126,10 @@ seed:
 # Модульные тесты (аргументы передаются pytest)
 test *args:
     uv run pytest tests/unit "$@"
+
+# Интеграционные тесты против заранее подготовленной тестовой PostgreSQL
+test-db-test *args:
+    uv run pytest tests/integration "$@"
 
 # ruff: правила и форматирование
 lint:

@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from app.broker import UnconfiguredBrokerProbe
 from app.clock import AdjustableClock
 from app.context import AppContext
-from app.db import make_engine, make_session_factory
+from app.db.session import make_engine, make_session_factory
 from app.jobs import JobRegistry
 from app.main import create_app
 from app.settings import Settings

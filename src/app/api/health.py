@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.context import get_context
-from app.db import check_database
+from app.db.session import check_database
 
 router = APIRouter(prefix="/health", tags=["health"])
 

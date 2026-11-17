@@ -16,7 +16,7 @@ from app.api import health, testing
 from app.broker import UnconfiguredBrokerProbe
 from app.clock import AdjustableClock
 from app.context import AppContext
-from app.db import make_engine, make_session_factory
+from app.db.session import make_engine, make_session_factory
 from app.errors import install_error_handlers
 from app.jobs import JobRegistry, run_periodically
 from app.settings import Settings, get_settings

@@ -15,7 +15,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import make_engine, make_session_factory
+from app.db.session import make_engine, make_session_factory
 from app.settings import get_settings
 
 # Корень репозитория: src/app/seed.py → parents[2]. В образе это /app (editable-установка пакета).

@@ -12,6 +12,7 @@ build/
 # Локальные переопределения переменных: образец — .env.example (в репозитории),
 # значения по умолчанию заданы в docker-compose.yml и src/app/settings.py.
 .env
+.env.test
 
 # Отчёты и локальные артефакты
 e2e-report.json
