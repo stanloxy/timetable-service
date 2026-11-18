@@ -70,7 +70,8 @@ async def seeded_factory(
 async def api_client(
     seeded_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[tuple[httpx.AsyncClient, AppContext]]:
-    context = build_context(Settings(test_mode=True))
+    database_url = load_test_database_url().render_as_string(hide_password=False)
+    context = build_context(Settings(test_mode=True, database_url=database_url))
     context.session_factory = seeded_factory
 
     app = create_app()
