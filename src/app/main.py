@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health, testing
+from app.api import groups, health, lessons, testing
 from app.broker import UnconfiguredBrokerProbe
 from app.clock import AdjustableClock
 from app.context import AppContext
@@ -88,6 +88,8 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(testing.router)
+    app.include_router(groups.router)
+    app.include_router(lessons.router)
     # ---> точка расширения: app.include_router(<предметный роутер>)
     return app
 

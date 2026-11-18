@@ -20,11 +20,11 @@ G1 = UUID("9a000000-0000-4000-8000-000000000001")
 
 @pytest.mark.parametrize("frozen", [True, False])
 async def test_reset_preserves_clock(
-    reset_client: tuple[httpx.AsyncClient, AppContext],
+    api_client: tuple[httpx.AsyncClient, AppContext],
     seeded_factory: async_sessionmaker[AsyncSession],
     frozen: bool,
 ) -> None:
-    client, context = reset_client
+    client, context = api_client
 
     if frozen:
         response = await client.put("/__test/time", json={"now": FROZEN})
@@ -49,10 +49,10 @@ async def test_reset_preserves_clock(
 
 
 async def test_reset_hidden_outside_test_mode(
-    reset_client: tuple[httpx.AsyncClient, AppContext],
+    api_client: tuple[httpx.AsyncClient, AppContext],
     seeded_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    client, context = reset_client
+    client, context = api_client
     await client.put("/__test/time", json={"now": FROZEN})
 
     async with session_scope(seeded_factory) as session:
@@ -97,11 +97,11 @@ async def test_failed_seed_rolls_back(
 
 
 async def test_failed_reset_rolls_back(
-    reset_client: tuple[httpx.AsyncClient, AppContext],
+    api_client: tuple[httpx.AsyncClient, AppContext],
     seeded_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client, context = reset_client
+    client, context = api_client
     await client.put("/__test/time", json={"now": FROZEN})
 
     async with session_scope(seeded_factory) as session:

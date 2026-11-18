@@ -7,12 +7,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 from app.clock import to_iso_z
 from app.context import AppContext, get_context
 from app.errors import ApiError, not_found
 from app.jobs import UnknownJobError
+from app.schemas.testing import JobResult, TestTime
 
 
 def require_test_mode(request: Request) -> AppContext:
@@ -26,20 +26,6 @@ def require_test_mode(request: Request) -> AppContext:
 TestContext = Annotated[AppContext, Depends(require_test_mode)]
 
 router = APIRouter(prefix="/__test", tags=["test-mode"])
-
-
-class TestTime(BaseModel):
-    """Тело и ответ ``/__test/time``. Время без смещения отклоняется (422 ``VALIDATION_ERROR``)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    now: AwareDatetime
-
-
-class JobResult(BaseModel):
-    """Ответ ``/__test/jobs/{job_name}/run``."""
-
-    processed: int
 
 
 @router.get("/time")
