@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from app.broker import UnconfiguredBrokerProbe
 from app.clock import AdjustableClock
 from app.context import AppContext
-from app.db import make_engine, make_session_factory
+from app.db.session import make_engine, make_session_factory
 from app.jobs import JobRegistry
 from app.main import create_app
 from app.settings import Settings
@@ -150,10 +150,29 @@ async def test_jobs_run_registered_and_unknown(
     assert missing.json()["error"]["code"] == "NOT_FOUND"
 
 
-async def test_reset_not_implemented_in_scaffold(
+async def test_reset_without_callback_returns_501(
     client: tuple[httpx.AsyncClient, AppContext],
 ) -> None:
     http, _ = client
     response = await http.post("/__test/reset")
     assert response.status_code == 501
     assert response.json()["error"]["code"] == "NOT_IMPLEMENTED"
+
+
+async def test_reset_calls_callback(
+    client: tuple[httpx.AsyncClient, AppContext],
+) -> None:
+    http, context = client
+    called = False
+
+    async def reset() -> None:
+        nonlocal called
+        called = True
+
+    context.reset_state = reset
+
+    response = await http.post("/__test/reset")
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert called

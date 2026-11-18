@@ -1,4 +1,4 @@
-"""Подключение к PostgreSQL: движок, фабрика async-сессий, базовый класс моделей."""
+"""Движок PostgreSQL, сессии, транзакции и проверка соединения."""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -10,11 +10,6 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
-
-
-class Base(DeclarativeBase):
-    """Базовый класс ORM-моделей. Alembic берёт metadata отсюда (migrations/env.py)."""
 
 
 def make_engine(database_url: str) -> AsyncEngine:

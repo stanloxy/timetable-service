@@ -33,12 +33,12 @@
 | Процесс | `CONTRIBUTING.md`, `.gitmessage`, `.githooks/commit-msg`, `tools/` | пакеты работ и ветки, Conventional Commits, слияние `--no-ff`, журнал времени; проверка истории `just lint-commits` |
 | CI | `.github/workflows/ci.yml`, `.gitlab-ci.yml` | lint + typecheck + test (+ сборка образа в GitHub Actions), проверка истории коммитов |
 | Настройки | `src/app/settings.py` | все переменные из `.env.example` |
-| БД | `src/app/db.py`, `migrations/` | движок, фабрика сессий, `Base`, пустая ревизия `0001` |
+| БД | `src/app/db/`, `migrations/` | движок и сессии в `session.py`, `Base` в `base.py`, модели Group/Lesson и предметные миграции после `0001` |
 | Часы | `src/app/clock.py` | `Clock`, `SystemClock`, `AdjustableClock`, `to_iso_z` |
 | Ошибки | `src/app/errors.py` | единый формат; 400/404/422 по соглашению пула; `ApiError` для предметных кодов |
 | Health | `src/app/api/health.py` | `/health/live`; `/health/ready` проверяет БД, брокер — `fail` до подключения |
-| Тестовый режим | `src/app/api/testing.py`, `src/app/jobs.py` | `/__test/time` работает; `/__test/jobs/{job}/run` работает для зарегистрированных задач; `/__test/reset` — 501 до реализации |
-| Seed | `seed/*.json`, `src/app/seed.py` | файлы даны, чтение готово, загрузка в БД — `NotImplementedError` |
+| Тестовый режим | `src/app/api/testing.py`, `src/app/jobs.py` | время и запуск зарегистрированных задач работают; reset подключён в build_context, восстанавливает seed атомарно и сохраняет часы; без callback остаётся 501 |
+| Seed | `seed/*.json`, `src/app/maintenance/seed.py`, `reset.py` | идемпотентная загрузка отсутствующих строк; reset очищает данные и восстанавливает исходный seed |
 | Заглушка | `stubs/people-stub/` | готова: фикстуры, режимы отказов (`stub.env`), `/__stub/config`, `/__stub/stats` |
 | E2E-хелперы | `tests/e2e/` | клиенты, брокер (RabbitMQ и Kafka), проверка схем из `openapi.yaml`, отчёт JSON |
 | Публичные e2e | `tests/e2e/public/` | сценарии из Приложения B задания; скрытый набор устроен так же |
@@ -46,20 +46,24 @@
 
 ## Точки расширения
 
-Помечены в коде комментарием `# ---> точка расширения`.
+Места подключения помечены в коде комментарием `# ---> точка расширения`.
+Модели, миграции и seed/reset уже добавлены; ниже также описано их дальнейшее расширение.
+Согласованная целевая структура и правила — в `AGENTS.md`; задачи чтения и переноса схем — в OpenSpec WP-01.
 
-1. **Модели и миграция.** ORM-классы наследуют `app.db.Base`; импорт модуля с моделями добавляется
-   в `migrations/env.py`; первая предметная миграция — `just migration "описание"` при поднятом стеке,
-   затем ревизия вручную (ограничения, индексы, расширения autogenerate не создаёт).
-2. **Предметный роутер.** `app.include_router(...)` в `src/app/main.py`. Предметные ошибки → `ApiError`
-   с кодами из `openapi.yaml`; формат ответа уже единый.
+1. **Модели и миграция.** ORM-классы наследуют `app.db.base.Base`; модели импортируются для metadata
+   в `migrations/env.py`. Новую ревизию создают после текущего head через `just migration "описание"`
+   или `just test-db-migration "описание"`; ограничения и индексы проверяют вручную.
+2. **Предметный роутер.** `app.include_router(...)` в `src/app/main.py`; Pydantic-схемы размещаются
+   в `src/app/schemas/`. Для предметных ошибок запланирована иерархия ServiceError и преобразование
+   в контрактные ответы через `src/app/errors.py`; существующий ApiError сохраняется.
 3. **Брокер.** Издатель событий по `asyncapi.yaml` и реализация `BrokerProbe.ping` для readiness;
    подставляется в `build_context`. Брокер стартует параллельно с `app`, поэтому подключение должно
    переживать его временную недоступность (повтор или ленивое соединение).
 4. **Фоновые задачи.** `context.jobs.register("<имя>", корутина)`; при `TEST_MODE=0` реестр крутится с
    интервалом `JOBS_INTERVAL_SECONDS`, при `TEST_MODE=1` — только `POST /__test/jobs/<имя>/run`.
-5. **Seed и сброс.** `app.seed.load_seed` (прямые INSERT, идемпотентно) и `context.reset_state`
-   (очистка таблиц + `load_seed`) для `POST /__test/reset`.
+5. **Seed и сброс.** `app.maintenance.seed.load_seed` выполняет прямые идемпотентные INSERT.
+   Подключённый `context.reset_state` вызывает `app.maintenance.reset.restore_seed`
+   (очистка таблиц + загрузка seed) в одном session_scope для `POST /__test/reset`.
 6. **Клиент заглушки.** HTTP-клиент не выбран каркасом; добавьте зависимость (`uv add httpx` или иную),
    соблюдая `STUB_TIMEOUT_MS` и коды 422/502/504 из задания.
 

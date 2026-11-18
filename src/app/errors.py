@@ -11,6 +11,7 @@
 (исключения домена → HTTP), решает автор сервиса.
 """
 
+import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -18,6 +19,10 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.services.exceptions import ResourceNotFoundError
+
+log = logging.getLogger(__name__)
 
 # Типы ошибок pydantic, которые означают «не тот тип/формат JSON», а не «неверное значение».
 _SYNTACTIC_ERROR_TYPES: frozenset[str] = frozenset(
@@ -112,6 +117,22 @@ def classify_validation_error(
 def install_error_handlers(app: FastAPI) -> None:
     """Подключить обработчики, приводящие все ошибки к единому формату."""
 
+    @app.exception_handler(ResourceNotFoundError)
+    async def _resource_not_found(
+        _: Request,
+        exc: ResourceNotFoundError,
+    ) -> JSONResponse:
+        messages = {
+            "group": "Группа не найдена",
+            "lesson": "Занятие не найдено",
+        }
+        return error_response(
+            404,
+            "NOT_FOUND",
+            messages[exc.resource],
+            {f"{exc.resource}_id": str(exc.resource_id)},
+        )
+
     @app.exception_handler(ApiError)
     async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
         return error_response(exc.status_code, exc.code, exc.message, exc.details)
@@ -129,6 +150,12 @@ def install_error_handlers(app: FastAPI) -> None:
         return error_response(exc.status_code, code, message)
 
     @app.exception_handler(Exception)
-    async def _unhandled(_: Request, exc: Exception) -> JSONResponse:
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
         # Необработанное исключение не должно отдавать клиенту текст трассировки.
+        log.error(
+            "Unhandled error during %s %s",
+            request.method,
+            request.url.path,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         return error_response(500, "INTERNAL_ERROR", "Внутренняя ошибка сервиса")

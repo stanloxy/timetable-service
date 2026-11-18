@@ -1,7 +1,7 @@
 # Seed `timetable-service`
 
 Детерминированные данные с фиксированными UUID. Загружаются `just seed`, при `SEED_ON_START=1`
-и `POST /__test/reset` (загрузчик — `src/app/seed.py`, пишется в рамках задания). Записи вставляются
+и `POST /__test/reset` (загрузчик — `src/app/maintenance/seed.py`). Записи вставляются
 напрямую, без доменной валидации: seed не должен зависеть от заглушки `people-stub`.
 Преподаватели и аудитории живут в заглушке (`stubs/people-stub/fixtures.json`), здесь только ссылки на них.
 

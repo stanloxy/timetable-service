@@ -9,33 +9,17 @@
 
 import asyncio
 from collections.abc import Awaitable
-from typing import Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 from app.context import get_context
-from app.db import check_database
+from app.db.session import check_database
+from app.schemas.health import DependencyStatus, Liveness, Readiness
 
 router = APIRouter(prefix="/health", tags=["health"])
 
-DependencyStatus = Literal["ok", "fail"]
 READINESS_TIMEOUT_SECONDS = 2.0
-
-
-class Liveness(BaseModel):
-    """Ответ ``/health/live``."""
-
-    status: Literal["ok"] = "ok"
-
-
-class Readiness(BaseModel):
-    """Ответ ``/health/ready``."""
-
-    status: Literal["ok", "degraded"]
-    db: DependencyStatus
-    broker: DependencyStatus
 
 
 async def _probe(check: Awaitable[bool]) -> DependencyStatus:
