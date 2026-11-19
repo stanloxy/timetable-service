@@ -88,6 +88,8 @@ async def test_people_client_reads_typed_responses() -> None:
         (PROFILE_PATH, 403, 502, "UPSTREAM_UNAVAILABLE", {"upstream": "people-stub"}),
         (PROFILE_PATH, "network", 502, "UPSTREAM_UNAVAILABLE", {"upstream": "people-stub"}),
         (CLASSROOM_PATH, "invalid", 502, "UPSTREAM_UNAVAILABLE", {"upstream": "people-stub"}),
+        (PROFILE_PATH, "timezone", 502, "UPSTREAM_UNAVAILABLE", {"upstream": "people-stub"}),
+        (AVAILABILITY_PATH, "window", 502, "UPSTREAM_UNAVAILABLE", {"upstream": "people-stub"}),
         (
             AVAILABILITY_PATH,
             "timeout",
@@ -114,6 +116,16 @@ async def test_people_error_response(
             raise httpx.ConnectError("Connection refused", request=request)
         if failure == "invalid":
             return httpx.Response(200, json={**RESPONSES[CLASSROOM_PATH], "capacity": "30"})
+        if failure == "timezone":
+            return httpx.Response(200, json={**RESPONSES[PROFILE_PATH], "timezone": "Unknown/Zone"})
+        if failure == "window":
+            return httpx.Response(
+                200,
+                json={
+                    **RESPONSES[AVAILABILITY_PATH],
+                    "windows": [{"weekday": 1, "from": "18:00", "to": "09:00"}],
+                },
+            )
         assert isinstance(failure, int)
         return httpx.Response(failure)
 

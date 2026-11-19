@@ -14,6 +14,14 @@ class LessonStatus(StrEnum):
     RESCHEDULED = "RESCHEDULED"
 
 
+ACTIVE_LESSON_STATUSES = (
+    LessonStatus.PLANNED,
+    LessonStatus.CONFIRMED,
+    LessonStatus.IN_PROGRESS,
+    LessonStatus.COMPLETED,
+)
+
+
 class LessonFormat(StrEnum):
     """Форматы проведения занятия."""
 

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.db.models import Group
 from app.db.repositories.groups import GroupRepository
 from app.db.session import session_scope
-from app.services.exceptions import ResourceNotFoundError
+from app.services.exceptions.resources import ResourceNotFoundError
 
 
 class GroupService:

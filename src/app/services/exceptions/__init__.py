@@ -1,0 +1,11 @@
+from app.services.exceptions.base import ServiceError as ServiceError
+from app.services.exceptions.lessons import ClassroomRequiredError as ClassroomRequiredError
+from app.services.exceptions.lessons import GroupNotFoundError as GroupNotFoundError
+from app.services.exceptions.lessons import LessonConflictError as LessonConflictError
+from app.services.exceptions.lessons import LessonValidationError as LessonValidationError
+from app.services.exceptions.people import ClassroomNotFoundError as ClassroomNotFoundError
+from app.services.exceptions.people import InstructorNotFoundError as InstructorNotFoundError
+from app.services.exceptions.people import UpstreamTimeoutError as UpstreamTimeoutError
+from app.services.exceptions.people import UpstreamUnavailableError as UpstreamUnavailableError
+from app.services.exceptions.resources import ResourceKind as ResourceKind
+from app.services.exceptions.resources import ResourceNotFoundError as ResourceNotFoundError
