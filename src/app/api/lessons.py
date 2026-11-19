@@ -1,20 +1,39 @@
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Body, Query, Request
+from pydantic import UUID4, BeforeValidator
 
 from app.api.responses import error_responses
 from app.context import get_context
+from app.db.models import Lesson
+from app.db.repositories.lessons import LessonFilters
 from app.schemas.errors import ErrorBody
 from app.schemas.lessons import (
     LessonCreate,
+    LessonListQuery,
+    LessonPage,
+    LessonPatch,
     LessonResponse,
     LessonValidationResult,
     LessonWithWarnings,
+    require_patch_fields,
 )
+from app.services.lesson_results import LessonWarning
 from app.services.lesson_rules import LessonCandidate
 from app.services.lessons import LessonService
 
 router = APIRouter(prefix="/lessons", tags=["lessons"])
+
+
+def _with_warnings(lesson: Lesson, warnings: list[LessonWarning]) -> LessonWithWarnings:
+    return LessonWithWarnings(
+        lesson=LessonResponse.model_validate(lesson),
+        warnings=[
+            ErrorBody(code=warning.code, message=warning.message, details=warning.details)
+            for warning in warnings
+        ],
+    )
 
 
 def _candidate(body: LessonCreate) -> LessonCandidate:
@@ -39,13 +58,7 @@ async def create_lesson(body: LessonCreate, request: Request) -> LessonWithWarni
     lesson, warnings = await LessonService(context.session_factory).create(
         _candidate(body), people=context.people_client, clock=context.clock
     )
-    return LessonWithWarnings(
-        lesson=LessonResponse.model_validate(lesson),
-        warnings=[
-            ErrorBody(code=warning.code, message=warning.message, details=warning.details)
-            for warning in warnings
-        ],
-    )
+    return _with_warnings(lesson, warnings)
 
 
 @router.post(
@@ -75,6 +88,23 @@ async def validate_lesson(body: LessonCreate, request: Request) -> LessonValidat
     )
 
 
+@router.get("", response_model=LessonPage, responses=error_responses(422))
+async def list_lessons(query: Annotated[LessonListQuery, Query()], request: Request) -> LessonPage:
+    context = get_context(request)
+    filters = LessonFilters(
+        group_id=query.group_id,
+        instructor_id=query.instructor_id,
+        classroom_id=query.classroom_id,
+        status=query.status,
+        starts_from=query.starts_from,
+        starts_before=query.starts_before,
+    )
+    items, total = await LessonService(context.session_factory).list_page(
+        filters, limit=query.limit, offset=query.offset
+    )
+    return LessonPage(items=[LessonResponse.model_validate(item) for item in items], total=total)
+
+
 @router.get(
     "/{lesson_id}",
     response_model=LessonResponse,
@@ -85,3 +115,20 @@ async def get_lesson(lesson_id: UUID, request: Request) -> LessonResponse:
     service = LessonService(context.session_factory)
     lesson = await service.get_by_id(lesson_id)
     return LessonResponse.model_validate(lesson)
+
+
+@router.patch(
+    "/{lesson_id}",
+    response_model=LessonWithWarnings,
+    responses=error_responses(400, 404, 409, 422, 502, 504),
+)
+async def edit_lesson(
+    lesson_id: UUID4,
+    body: Annotated[LessonPatch, BeforeValidator(require_patch_fields), Body()],
+    request: Request,
+) -> LessonWithWarnings:
+    context = get_context(request)
+    lesson, warnings = await LessonService(context.session_factory).edit(
+        lesson_id, body, people=context.people_client, clock=context.clock
+    )
+    return _with_warnings(lesson, warnings)

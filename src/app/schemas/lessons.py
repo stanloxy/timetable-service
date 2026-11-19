@@ -1,9 +1,20 @@
 import re
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import UUID4, AwareDatetime, BaseModel, ConfigDict, field_serializer, field_validator
+from pydantic import (
+    UUID4,
+    AwareDatetime,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_serializer,
+    with_config,
+)
 from pydantic_core import PydanticCustomError
+from typing_extensions import TypedDict
 
 from app.clock import to_iso_z
 from app.enums.lessons import LessonFormat, LessonStatus
@@ -12,33 +23,70 @@ from app.schemas.errors import ErrorBody
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(?:[Tt ]|$)")
 
 
+def _require_iso_datetime(value: object) -> object:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        raise PydanticCustomError("datetime_type", "Ожидается строка даты и времени")
+    if not _ISO_DATE.match(value):
+        raise ValueError("Ожидается ISO 8601 со смещением")
+    return value
+
+
+def _require_string_format(value: object) -> str:
+    if not isinstance(value, str):
+        raise PydanticCustomError("string_type", "Ожидается строка формата занятия")
+    return value
+
+
+IsoDateTime = Annotated[AwareDatetime, BeforeValidator(_require_iso_datetime)]
+InputLessonFormat = Annotated[LessonFormat, BeforeValidator(_require_string_format)]
+
+
 class LessonCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     group_id: UUID4
     instructor_id: UUID4
     classroom_id: UUID4 | None = None
-    format: LessonFormat
-    starts_at: AwareDatetime
-    ends_at: AwareDatetime
+    format: InputLessonFormat
+    starts_at: IsoDateTime
+    ends_at: IsoDateTime
 
-    @field_validator("starts_at", "ends_at", mode="before")
-    @classmethod
-    def require_iso_datetime(cls, value: object) -> object:
-        if isinstance(value, datetime):
-            return value
-        if not isinstance(value, str):
-            raise PydanticCustomError("datetime_type", "Ожидается строка даты и времени")
-        if not _ISO_DATE.match(value):
-            raise ValueError("Ожидается ISO 8601 со смещением")
-        return value
 
-    @field_validator("format", mode="before")
-    @classmethod
-    def require_string_format(cls, value: object) -> object:
-        if not isinstance(value, str):
-            raise PydanticCustomError("string_type", "Ожидается строка формата занятия")
-        return value
+@with_config(ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1}))
+class LessonPatch(TypedDict, total=False):
+    instructor_id: UUID4
+    classroom_id: UUID4 | None
+    format: InputLessonFormat
+    starts_at: IsoDateTime
+    ends_at: IsoDateTime
+
+
+def require_patch_fields(value: object) -> object:
+    if isinstance(value, dict) and not value:
+        raise ValueError("Передайте хотя бы одно поле занятия")
+    return value
+
+
+def _query_integer(value: object) -> object:
+    if isinstance(value, str) and not re.fullmatch(r"[+-]?[0-9]+", value):
+        raise ValueError("Ожидается целое число")
+    return value
+
+
+QueryInteger = Annotated[int, BeforeValidator(_query_integer)]
+
+
+class LessonListQuery(BaseModel):
+    group_id: UUID4 | None = None
+    instructor_id: UUID4 | None = None
+    classroom_id: UUID4 | None = None
+    status: LessonStatus | None = None
+    starts_from: IsoDateTime | None = Field(default=None, alias="from")
+    starts_before: IsoDateTime | None = Field(default=None, alias="to")
+    limit: QueryInteger = Field(default=50, ge=1, le=200)
+    offset: QueryInteger = Field(default=0, ge=0)
 
 
 class LessonResponse(BaseModel):
@@ -71,6 +119,11 @@ class LessonResponse(BaseModel):
 class LessonWithWarnings(BaseModel):
     lesson: LessonResponse
     warnings: list[ErrorBody]
+
+
+class LessonPage(BaseModel):
+    items: list[LessonResponse]
+    total: int
 
 
 class LessonValidationResult(BaseModel):

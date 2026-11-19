@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -58,6 +58,7 @@ async def check_lesson(
     people: PeopleReader,
     lock_for_write: bool,
     exclude_lesson_id: UUID | None = None,
+    previous_resources: Iterable[tuple[str, UUID]] = (),
 ) -> list[LessonWarning]:
     """Проверить BR-01…BR-07 на сессии вызывающего сценария."""
     candidate = replace(
@@ -70,7 +71,7 @@ async def check_lesson(
     _check_capacity(group_size, references.classroom)
 
     if lock_for_write:
-        await lessons.lock_resources(candidate.resources().items())
+        await lessons.lock_resources((*candidate.resources().items(), *previous_resources))
     # Отдельный SELECT после ожидания блокировки видит уже зафиксированную запись конкурента.
     await _check_conflicts(candidate, lessons, exclude_lesson_id)
     return await _collect_warnings(candidate, lessons, references, exclude_lesson_id)

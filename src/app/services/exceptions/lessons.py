@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.enums.lessons import LessonStatus
 from app.services.exceptions.base import ServiceError
 from app.services.lesson_results import LessonViolation
 
@@ -18,6 +19,12 @@ class LessonValidationError(ServiceError):
 
 class ClassroomRequiredError(ServiceError):
     """Очное занятие требует аудиторию."""
+
+
+class LessonNotEditableError(ServiceError):
+    def __init__(self, current_status: LessonStatus) -> None:
+        self.current_status = current_status
+        super().__init__(f"Lesson in status {current_status} cannot be edited")
 
 
 class LessonConflictError(ServiceError):
