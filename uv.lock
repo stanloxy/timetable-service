@@ -1560,6 +1560,7 @@ dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -1568,7 +1569,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1577,7 +1577,6 @@ dev = [
 e2e = [
     { name = "aio-pika" },
     { name = "aiokafka" },
-    { name = "httpx" },
     { name = "jsonschema" },
     { name = "pyyaml" },
     { name = "referencing" },
@@ -1590,6 +1589,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "asyncpg", specifier = ">=0.29" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36,<2.1" },
@@ -1598,7 +1598,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
@@ -1607,7 +1606,6 @@ dev = [
 e2e = [
     { name = "aio-pika", specifier = ">=9.4" },
     { name = "aiokafka", specifier = ">=0.11" },
-    { name = "httpx", specifier = ">=0.27" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "referencing", specifier = ">=0.35" },

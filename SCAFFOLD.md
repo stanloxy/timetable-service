@@ -40,6 +40,7 @@
 | Тестовый режим | `src/app/api/testing.py`, `src/app/jobs.py` | время и запуск зарегистрированных задач работают; reset подключён в build_context, восстанавливает seed атомарно и сохраняет часы; без callback остаётся 501 |
 | Seed | `seed/*.json`, `src/app/maintenance/seed.py`, `reset.py` | идемпотентная загрузка отсутствующих строк; reset очищает данные и восстанавливает исходный seed |
 | Заглушка | `stubs/people-stub/` | готова: фикстуры, режимы отказов (`stub.env`), `/__stub/config`, `/__stub/stats` |
+| Клиент заглушки | `src/app/clients/people.py`, `src/app/services/lesson_reference_data.py` | три типизированных запроса, таймаут на вызов, параллельная сборка данных |
 | E2E-хелперы | `tests/e2e/` | клиенты, брокер (RabbitMQ и Kafka), проверка схем из `openapi.yaml`, отчёт JSON |
 | Публичные e2e | `tests/e2e/public/` | сценарии из Приложения B задания; скрытый набор устроен так же |
 | OpenSpec | `openspec/` | инициализирован (`config.yaml`, `specs/`, `changes/`) |
@@ -64,8 +65,9 @@
 5. **Seed и сброс.** `app.maintenance.seed.load_seed` выполняет прямые идемпотентные INSERT.
    Подключённый `context.reset_state` вызывает `app.maintenance.reset.restore_seed`
    (очистка таблиц + загрузка seed) в одном session_scope для `POST /__test/reset`.
-6. **Клиент заглушки.** HTTP-клиент не выбран каркасом; добавьте зависимость (`uv add httpx` или иную),
-   соблюдая `STUB_TIMEOUT_MS` и коды 422/502/504 из задания.
+6. **Клиент заглушки.** `lifespan` управляет общим экземпляром HTTPX. Сценарии проверки занятий
+   получают `context.people_client` через явный параметр и вызывают `collect_lesson_reference_data`.
+   Сервис параллельно собирает данные, а `errors.py` формирует контрактные ответы 422/502/504.
 
 ## Выбор брокера
 

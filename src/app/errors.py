@@ -5,10 +5,7 @@
 - 400 ``BAD_REQUEST`` — синтаксически невалидный запрос: невалидный JSON, неверный тип поля;
 - 404 ``NOT_FOUND`` — ресурс из пути не найден (в том числе неизвестный маршрут);
 - 422 ``VALIDATION_ERROR`` — семантически невалидные данные, ``details.fields`` — поле → сообщение;
-- предметные коды (409 ``SCHEDULE_CONFLICT`` и т. п.) поднимаются кодом сервиса через ``ApiError``.
-
-Каркас даёт только инфраструктуру формата. Как предметные ошибки превращаются в ``ApiError``
-(исключения домена → HTTP), решает автор сервиса.
+- ожидаемые ошибки сценариев преобразуются в HTTP-ответы обработчиками ниже.
 """
 
 import logging
@@ -20,7 +17,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.services.exceptions import ResourceNotFoundError
+from app.services.exceptions import (
+    ClassroomNotFoundError,
+    InstructorNotFoundError,
+    ResourceNotFoundError,
+    UpstreamTimeoutError,
+    UpstreamUnavailableError,
+)
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +134,42 @@ def install_error_handlers(app: FastAPI) -> None:
             "NOT_FOUND",
             messages[exc.resource],
             {f"{exc.resource}_id": str(exc.resource_id)},
+        )
+
+    @app.exception_handler(InstructorNotFoundError)
+    async def _instructor_not_found(_: Request, exc: InstructorNotFoundError) -> JSONResponse:
+        return error_response(
+            422,
+            "INSTRUCTOR_NOT_FOUND",
+            "Преподаватель не найден",
+            {"instructor_id": str(exc.instructor_id)},
+        )
+
+    @app.exception_handler(ClassroomNotFoundError)
+    async def _classroom_not_found(_: Request, exc: ClassroomNotFoundError) -> JSONResponse:
+        return error_response(
+            422,
+            "CLASSROOM_NOT_FOUND",
+            "Аудитория не найдена",
+            {"classroom_id": str(exc.classroom_id)},
+        )
+
+    @app.exception_handler(UpstreamUnavailableError)
+    async def _upstream_unavailable(_: Request, __: UpstreamUnavailableError) -> JSONResponse:
+        return error_response(
+            502,
+            "UPSTREAM_UNAVAILABLE",
+            "Сервис людей и аудиторий недоступен",
+            {"upstream": "people-stub"},
+        )
+
+    @app.exception_handler(UpstreamTimeoutError)
+    async def _upstream_timeout(_: Request, exc: UpstreamTimeoutError) -> JSONResponse:
+        return error_response(
+            504,
+            "UPSTREAM_TIMEOUT",
+            "Сервис людей и аудиторий не ответил вовремя",
+            {"upstream": "people-stub", "timeout_ms": exc.timeout_ms},
         )
 
     @app.exception_handler(ApiError)
