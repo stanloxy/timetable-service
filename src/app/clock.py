@@ -59,10 +59,10 @@ class AdjustableClock:
         return self._frozen is not None
 
 
-def to_iso_z(moment: datetime) -> str:
+def to_iso_z(moment: datetime, *, preserve_fraction: bool = False) -> str:
     """ISO 8601 в UTC с суффиксом ``Z`` — формат времени во всех ответах и событиях платформы."""
     if moment.tzinfo is None:
         msg = "Ожидается aware datetime"
         raise ValueError(msg)
-    utc = moment.astimezone(UTC).replace(microsecond=0)
-    return utc.isoformat().replace("+00:00", "Z")
+    timespec = "auto" if preserve_fraction else "seconds"
+    return moment.astimezone(UTC).isoformat(timespec=timespec).replace("+00:00", "Z")

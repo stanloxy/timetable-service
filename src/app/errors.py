@@ -17,13 +17,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.services.exceptions import (
-    ClassroomNotFoundError,
-    InstructorNotFoundError,
-    ResourceNotFoundError,
-    UpstreamTimeoutError,
-    UpstreamUnavailableError,
-)
+from app.api.errors.lessons import install_lesson_error_handlers
+from app.api.errors.people import install_people_error_handlers
+from app.api.errors.responses import error_payload as error_payload
+from app.api.errors.responses import error_response as error_response
+from app.services.exceptions.resources import ResourceNotFoundError
 
 log = logging.getLogger(__name__)
 
@@ -74,20 +72,6 @@ class ApiError(Exception):
         self.details: dict[str, Any] = dict(details or {})
 
 
-def error_payload(
-    code: str, message: str, details: Mapping[str, Any] | None = None
-) -> dict[str, Any]:
-    """Тело ответа с ошибкой."""
-    return {"error": {"code": code, "message": message, "details": dict(details or {})}}
-
-
-def error_response(
-    status_code: int, code: str, message: str, details: Mapping[str, Any] | None = None
-) -> JSONResponse:
-    """Готовый ``JSONResponse`` в едином формате."""
-    return JSONResponse(status_code=status_code, content=error_payload(code, message, details))
-
-
 def not_found(message: str = "Ресурс не найден", **details: Any) -> ApiError:
     """Фабрика 404 ``NOT_FOUND``."""
     return ApiError(404, "NOT_FOUND", message, details)
@@ -119,6 +103,8 @@ def classify_validation_error(
 
 def install_error_handlers(app: FastAPI) -> None:
     """Подключить обработчики, приводящие все ошибки к единому формату."""
+    install_lesson_error_handlers(app)
+    install_people_error_handlers(app)
 
     @app.exception_handler(ResourceNotFoundError)
     async def _resource_not_found(
@@ -134,42 +120,6 @@ def install_error_handlers(app: FastAPI) -> None:
             "NOT_FOUND",
             messages[exc.resource],
             {f"{exc.resource}_id": str(exc.resource_id)},
-        )
-
-    @app.exception_handler(InstructorNotFoundError)
-    async def _instructor_not_found(_: Request, exc: InstructorNotFoundError) -> JSONResponse:
-        return error_response(
-            422,
-            "INSTRUCTOR_NOT_FOUND",
-            "Преподаватель не найден",
-            {"instructor_id": str(exc.instructor_id)},
-        )
-
-    @app.exception_handler(ClassroomNotFoundError)
-    async def _classroom_not_found(_: Request, exc: ClassroomNotFoundError) -> JSONResponse:
-        return error_response(
-            422,
-            "CLASSROOM_NOT_FOUND",
-            "Аудитория не найдена",
-            {"classroom_id": str(exc.classroom_id)},
-        )
-
-    @app.exception_handler(UpstreamUnavailableError)
-    async def _upstream_unavailable(_: Request, __: UpstreamUnavailableError) -> JSONResponse:
-        return error_response(
-            502,
-            "UPSTREAM_UNAVAILABLE",
-            "Сервис людей и аудиторий недоступен",
-            {"upstream": "people-stub"},
-        )
-
-    @app.exception_handler(UpstreamTimeoutError)
-    async def _upstream_timeout(_: Request, exc: UpstreamTimeoutError) -> JSONResponse:
-        return error_response(
-            504,
-            "UPSTREAM_TIMEOUT",
-            "Сервис людей и аудиторий не ответил вовремя",
-            {"upstream": "people-stub", "timeout_ms": exc.timeout_ms},
         )
 
     @app.exception_handler(ApiError)

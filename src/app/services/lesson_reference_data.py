@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
-from app.clients.people import PeopleTimeoutError, PeopleUnavailableError
+from app.clients.errors.people import PeopleTimeoutError, PeopleUnavailableError
 from app.clients.people_models import Availability, Classroom, Instructor
 from app.enums.lessons import LessonFormat
-from app.services.exceptions import (
+from app.services.exceptions.people import (
     ClassroomNotFoundError,
     InstructorNotFoundError,
     UpstreamTimeoutError,
