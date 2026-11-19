@@ -19,6 +19,7 @@ from tests.integration.maintenance.helpers import snapshot
 _CREATE = "/lessons"
 _VALIDATE = "/lessons/validate"
 _POSTS = [_CREATE, _VALIDATE]
+_EDIT = f"/lessons/{IDS['L1']}"
 _BASE_BODY: dict[str, object] = {
     "group_id": IDS["G1"],
     "instructor_id": IDS["I1"],
@@ -131,6 +132,144 @@ async def test_create_and_read_planned_lesson(
     assert sorted(stub.calls) == ["availability", "classrooms", "instructors"]
     after = await _snapshot(context.session_factory)
     assert len(after["lessons"]) == len(before["lessons"]) + 1
+
+
+async def test_edit_merges_fields_and_excludes_the_original(
+    schedule_api: tuple[httpx.AsyncClient, AppContext, Stub], contract: ContractChecker
+) -> None:
+    http, context, stub = schedule_api
+    stub.limit = 1.0
+    before = (await http.get(_EDIT)).json()
+    context.clock.freeze(datetime(2026, 12, 4, 3, 0, 0, 123456, tzinfo=UTC))
+
+    response = await http.patch(_EDIT, json={"starts_at": "2026-12-01T10:30:00+05:00"})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    contract.assert_schema(result, "LessonWithWarnings")
+    expected = {
+        **before,
+        "starts_at": "2026-12-01T05:30:00Z",
+        "updated_at": "2026-12-04T03:00:00.123456Z",
+    }
+    assert result == {"lesson": expected, "warnings": []}
+    assert sorted(stub.calls) == ["availability", "classrooms", "instructors"]
+
+    stub.calls.clear()
+    context.clock.freeze(datetime(2026, 12, 5, tzinfo=UTC))
+    response = await http.patch(_EDIT, json={"format": "ONLINE", "classroom_id": None})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    contract.assert_schema(result, "LessonWithWarnings")
+    expected.update(format="ONLINE", classroom_id=None, updated_at="2026-12-05T00:00:00Z")
+    assert result == {"lesson": expected, "warnings": []}
+    assert (await http.get(_EDIT)).json() == expected
+    assert sorted(stub.calls) == ["availability", "instructors"]
+
+
+async def test_edit_rescheduled_successor_preserves_predecessor(
+    schedule_api: tuple[httpx.AsyncClient, AppContext, Stub],
+) -> None:
+    http, _, _ = schedule_api
+    path = f"/lessons/{IDS['L7']}"
+    response = await http.patch(path, json={"instructor_id": IDS["I2"]})
+    assert response.status_code == 200, response.text
+    assert response.json()["lesson"]["rescheduled_from_id"] == IDS["L6"]
+    assert response.json()["lesson"]["instructor_id"] == IDS["I2"]
+
+
+@pytest.mark.parametrize(
+    ("key", "current_status"),
+    [
+        ("L2", "CONFIRMED"),
+        ("L5", "CANCELLED"),
+        ("L6", "RESCHEDULED"),
+        ("L8", "COMPLETED"),
+        ("L_MISSING", None),
+    ],
+)
+async def test_edit_checks_existence_and_status_before_rules(
+    schedule_api: tuple[httpx.AsyncClient, AppContext, Stub],
+    contract: ContractChecker,
+    key: str,
+    current_status: str | None,
+) -> None:
+    http, context, stub = schedule_api
+    before = await _snapshot(context.session_factory)
+    response = await http.patch(f"/lessons/{IDS[key]}", json={"ends_at": "2026-11-01T00:00:00Z"})
+    if current_status is None:
+        assert contract.assert_error(response, 404, "NOT_FOUND") == {"lesson_id": IDS[key]}
+    else:
+        assert contract.assert_error(response, 409, "LESSON_NOT_EDITABLE") == {
+            "current_status": current_status
+        }
+    assert stub.calls == []
+    assert await _snapshot(context.session_factory) == before
+
+
+async def test_edit_reports_exact_conflicts_and_preserves_the_original(
+    schedule_api: tuple[httpx.AsyncClient, AppContext, Stub], contract: ContractChecker
+) -> None:
+    http, context, _ = schedule_api
+    before = await _snapshot(context.session_factory)
+    response = await http.patch(
+        _EDIT, json={"starts_at": "2026-12-01T07:30:00Z", "ends_at": "2026-12-01T09:00:00Z"}
+    )
+    assert contract.assert_error(response, 409, "SCHEDULE_CONFLICT") == {
+        "conflicts": [
+            {
+                "resource": "classroom",
+                "lesson_id": IDS["L2"],
+                "overlap": {"starts_at": "2026-12-01T07:30:00Z", "ends_at": "2026-12-01T08:30:00Z"},
+            }
+        ]
+    }
+    assert await _snapshot(context.session_factory) == before
+
+
+async def test_edit_returns_both_warnings(
+    schedule_api: tuple[httpx.AsyncClient, AppContext, Stub], contract: ContractChecker
+) -> None:
+    http, _, stub = schedule_api
+    stub.limit = 1.0
+    stub.windows = []
+    response = await http.patch(_EDIT, json={"classroom_id": IDS["C2"]})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    contract.assert_schema(result, "LessonWithWarnings")
+    assert result["lesson"]["classroom_id"] == IDS["C2"]
+    warnings = [(warning["code"], warning["details"]) for warning in result["warnings"]]
+    assert warnings == [
+        ("WORKLOAD_SOFT_LIMIT", {"date": "2026-12-01", "max_hours": 1.0, "planned_hours": 1.5}),
+        ("INSTRUCTOR_UNAVAILABLE", {"instructor_id": IDS["I1"]}),
+    ]
+    assert (await http.get(_EDIT)).json() == result["lesson"]
+
+
+@pytest.mark.parametrize(
+    ("changes", "upstream_failure", "status", "code"),
+    [
+        ({"ends_at": "2026-12-01T05:05:00Z"}, None, 422, "VALIDATION_ERROR"),
+        ({"format": "ONLINE"}, None, 422, "VALIDATION_ERROR"),
+        ({"classroom_id": None}, None, 422, "CLASSROOM_REQUIRED"),
+        ({"classroom_id": IDS["C2"]}, 500, 502, "UPSTREAM_UNAVAILABLE"),
+        ({"classroom_id": IDS["C2"]}, "timeout", 504, "UPSTREAM_TIMEOUT"),
+    ],
+)
+async def test_edit_failure_does_not_change_schedule(
+    schedule_api: tuple[httpx.AsyncClient, AppContext, Stub],
+    contract: ContractChecker,
+    changes: dict[str, str | None],
+    upstream_failure: int | str | None,
+    status: int,
+    code: str,
+) -> None:
+    http, context, stub = schedule_api
+    if upstream_failure is not None:
+        stub.failures["classrooms"] = upstream_failure
+    before = await _snapshot(context.session_factory)
+    response = await http.patch(_EDIT, json=changes)
+    contract.assert_error(response, status, code)
+    assert await _snapshot(context.session_factory) == before
 
 
 @pytest.mark.parametrize("path", _POSTS)

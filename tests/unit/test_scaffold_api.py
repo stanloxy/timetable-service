@@ -184,3 +184,66 @@ async def test_reset_calls_callback(
     assert response.status_code == 204
     assert response.content == b""
     assert called
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("group_id", "invalid"),
+        ("instructor_id", "00000000-0000-1000-8000-000000000001"),
+        ("classroom_id", ""),
+        ("status", "planned"),
+        ("from", "2026-12-01T10:00:00"),
+        ("to", "1796126400"),
+        ("limit", "0"),
+        ("limit", "201"),
+        ("limit", "1.0"),
+        ("offset", "-1"),
+        ("offset", "invalid"),
+    ],
+)
+async def test_invalid_lesson_query(
+    client: tuple[httpx.AsyncClient, AppContext], field: str, value: str
+) -> None:
+    http, _ = client
+    response = await http.get("/lessons", params={field: value})
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert set(error["details"]["fields"]) == {field}
+
+
+@pytest.mark.parametrize(
+    ("body", "status", "code", "fields"),
+    [
+        ("{}", 422, "VALIDATION_ERROR", {"body"}),
+        ('{"group_id": 123, "status": "PLANNED"}', 422, "VALIDATION_ERROR", {"group_id", "status"}),
+        ('{"starts_at":"2026-12-01T10:00:00"}', 422, "VALIDATION_ERROR", {"starts_at"}),
+        ('{"instructor_id":null}', 400, "BAD_REQUEST", {"instructor_id"}),
+        ('{"ends_at":123}', 400, "BAD_REQUEST", {"ends_at"}),
+        ('{"format":null}', 400, "BAD_REQUEST", {"format"}),
+        ("[]", 400, "BAD_REQUEST", {"body"}),
+        ("null", 400, "BAD_REQUEST", {"body"}),
+        ("{", 400, "BAD_REQUEST", {"body"}),
+    ],
+)
+async def test_invalid_lesson_patch(
+    client: tuple[httpx.AsyncClient, AppContext],
+    body: str,
+    status: int,
+    code: str,
+    fields: set[str],
+) -> None:
+    http, _ = client
+    response = await http.patch(
+        "/lessons/3d000000-0000-4000-8000-000000000001",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == status
+    error = response.json()["error"]
+    assert error["code"] == code
+    if status == 400:
+        assert {problem["field"] for problem in error["details"]["errors"]} == fields
+    else:
+        assert set(error["details"]["fields"]) == fields

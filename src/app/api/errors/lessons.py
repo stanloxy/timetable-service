@@ -6,6 +6,7 @@ from app.services.exceptions.lessons import (
     ClassroomRequiredError,
     GroupNotFoundError,
     LessonConflictError,
+    LessonNotEditableError,
     LessonValidationError,
 )
 
@@ -29,3 +30,12 @@ def install_lesson_error_handlers(app: FastAPI) -> None:
     async def _lesson_conflict(_: Request, exc: LessonConflictError) -> JSONResponse:
         violation = exc.violation
         return error_response(409, violation.code, violation.message, violation.details)
+
+    @app.exception_handler(LessonNotEditableError)
+    async def _lesson_not_editable(_: Request, exc: LessonNotEditableError) -> JSONResponse:
+        return error_response(
+            409,
+            "LESSON_NOT_EDITABLE",
+            "Изменять можно только занятие в статусе PLANNED",
+            {"current_status": exc.current_status.value},
+        )
