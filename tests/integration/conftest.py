@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.clients.people import PeopleClient
 from app.context import AppContext
 from app.db.models import Group, Lesson
 from app.db.session import session_scope
@@ -71,21 +72,24 @@ async def api_client(
     seeded_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[tuple[httpx.AsyncClient, AppContext]]:
     database_url = load_test_database_url().render_as_string(hide_password=False)
-    context = build_context(Settings(test_mode=True, database_url=database_url))
-    context.session_factory = seeded_factory
+    settings = Settings(test_mode=True, database_url=database_url)
 
-    app = create_app()
-    app.state.context = context
+    def reject_upstream(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Unexpected people-stub request: {request.url}")
 
-    transport = httpx.ASGITransport(
-        app=app,
-        raise_app_exceptions=False,
-    )
-    try:
-        async with httpx.AsyncClient(
-            transport=transport,
-            base_url="http://test",
-        ) as client:
-            yield client, context
-    finally:
-        await context.engine.dispose()
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(reject_upstream), base_url=settings.stub_base_url
+    ) as upstream:
+        context = build_context(settings, PeopleClient(upstream, settings.stub_timeout_ms))
+        context.session_factory = seeded_factory
+
+        app = create_app()
+        app.state.context = context
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://test",
+            ) as client:
+                yield client, context
+        finally:
+            await context.engine.dispose()

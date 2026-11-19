@@ -1,13 +1,14 @@
 """Служебные эндпоинты каркаса без БД и брокера: формат ошибок, тестовый режим, часы, задачи."""
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import httpx
 import pytest
-from fastapi import FastAPI
 
 from app.broker import UnconfiguredBrokerProbe
+from app.clients.people import PeopleClient
 from app.clock import AdjustableClock
 from app.context import AppContext
 from app.db.session import make_engine, make_session_factory
@@ -18,40 +19,50 @@ from app.settings import Settings
 FROZEN = "2026-11-30T03:00:00Z"
 
 
-def _build_app(*, test_mode: bool) -> tuple[FastAPI, AppContext]:
-    """Приложение с контекстом, собранным вручную: lifespan не запускается, сеть не нужна."""
+@asynccontextmanager
+async def _api_client(*, test_mode: bool) -> AsyncIterator[tuple[httpx.AsyncClient, AppContext]]:
+    """Клиент приложения с контекстом, собранным вручную без lifespan."""
     settings = Settings(
         test_mode=test_mode,
         database_url="postgresql+asyncpg://wa:wa@127.0.0.1:1/unreachable",
     )
-    engine = make_engine(settings.database_url)
-    context = AppContext(
-        settings=settings,
-        engine=engine,
-        session_factory=make_session_factory(engine),
-        clock=AdjustableClock(),
-        broker_probe=UnconfiguredBrokerProbe(),
-        jobs=JobRegistry(),
-    )
-    app = create_app()
-    app.state.context = context
-    return app, context
+
+    def reject_upstream(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Unexpected people-stub request: {request.url}")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(reject_upstream), base_url=settings.stub_base_url
+    ) as upstream:
+        engine = make_engine(settings.database_url)
+        try:
+            context = AppContext(
+                settings=settings,
+                engine=engine,
+                session_factory=make_session_factory(engine),
+                clock=AdjustableClock(),
+                broker_probe=UnconfiguredBrokerProbe(),
+                people_client=PeopleClient(upstream, settings.stub_timeout_ms),
+                jobs=JobRegistry(),
+            )
+            app = create_app()
+            app.state.context = context
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as http:
+                yield http, context
+        finally:
+            await engine.dispose()
 
 
 @pytest.fixture
 async def client() -> AsyncIterator[tuple[httpx.AsyncClient, AppContext]]:
-    app, context = _build_app(test_mode=True)
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
-        yield http, context
+    async with _api_client(test_mode=True) as api:
+        yield api
 
 
-async def test_live() -> None:
-    app, _ = _build_app(test_mode=True)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as http:
-        response = await http.get("/health/live")
+async def test_live(client: tuple[httpx.AsyncClient, AppContext]) -> None:
+    http, _ = client
+    response = await http.get("/health/live")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
@@ -77,10 +88,7 @@ async def test_unknown_route_uses_platform_error_format(
 
 
 async def test_test_endpoints_hidden_when_test_mode_off() -> None:
-    app, _ = _build_app(test_mode=False)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
-    ) as http:
+    async with _api_client(test_mode=False) as (http, _):
         response = await http.get("/__test/time")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "NOT_FOUND"

@@ -1,9 +1,4 @@
-"""Точка входа приложения: сборка FastAPI, lifespan, подключение роутеров.
-
-Это каркас. Он поднимает процесс с БД, часами, реестром фоновых задач и служебными эндпоинтами.
-Предметные роутеры, модели, клиент заглушки и издатель событий добавляются автором сервиса;
-место для их подключения помечено комментариями ``# ---> точка расширения``.
-"""
+"""Точка входа приложения: сборка FastAPI, lifespan, подключение роутеров."""
 
 import asyncio
 import logging
@@ -11,9 +6,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from httpx import AsyncClient
 
 from app.api import groups, health, lessons, testing
 from app.broker import UnconfiguredBrokerProbe
+from app.clients.people import PeopleClient
 from app.clock import AdjustableClock
 from app.context import AppContext
 from app.db.session import make_engine, make_session_factory, session_scope
@@ -26,7 +23,7 @@ from app.settings import Settings, get_settings
 log = logging.getLogger(__name__)
 
 
-def build_context(settings: Settings) -> AppContext:
+def build_context(settings: Settings, people_client: PeopleClient) -> AppContext:
     """Создать зависимости процесса (вне lifespan, чтобы тесты собирали контекст без сети)."""
     engine = make_engine(settings.database_url)
     context = AppContext(
@@ -36,6 +33,7 @@ def build_context(settings: Settings) -> AppContext:
         clock=AdjustableClock(),
         # ---> точка расширения: реальная проверка брокера (вместе с издателем событий).
         broker_probe=UnconfiguredBrokerProbe(),
+        people_client=people_client,
         jobs=JobRegistry(),
     )
 
@@ -55,25 +53,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Жизненный цикл процесса: ресурсы создаются при старте и закрываются при остановке."""
     settings = get_settings()
     logging.basicConfig(level=settings.log_level.upper())
-    context = build_context(settings)
-    app.state.context = context
+    async with AsyncClient(base_url=settings.stub_base_url) as http:
+        people_client = PeopleClient(http, settings.stub_timeout_ms)
+        context = build_context(settings, people_client)
+        app.state.context = context
 
-    stop = asyncio.Event()
-    periodic: asyncio.Task[None] | None = None
-    if settings.test_mode:
-        log.info("TEST_MODE=1: /__test/* включены, периодические задачи отключены")
-    else:
-        periodic = asyncio.create_task(
-            run_periodically(context.jobs, settings.jobs_interval_seconds, stop),
-            name="periodic-jobs",
-        )
-    try:
-        yield
-    finally:
-        stop.set()
-        if periodic is not None:
-            await periodic
-        await context.engine.dispose()
+        stop = asyncio.Event()
+        periodic: asyncio.Task[None] | None = None
+        try:
+            if settings.test_mode:
+                log.info("TEST_MODE=1: /__test/* включены, периодические задачи отключены")
+            else:
+                periodic = asyncio.create_task(
+                    run_periodically(context.jobs, settings.jobs_interval_seconds, stop),
+                    name="periodic-jobs",
+                )
+            try:
+                yield
+            finally:
+                stop.set()
+                if periodic is not None:
+                    await periodic
+        finally:
+            await context.engine.dispose()
 
 
 def create_app() -> FastAPI:
