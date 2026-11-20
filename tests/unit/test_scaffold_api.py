@@ -247,3 +247,45 @@ async def test_invalid_lesson_patch(
         assert {problem["field"] for problem in error["details"]["errors"]} == fields
     else:
         assert set(error["details"]["fields"]) == fields
+
+
+@pytest.mark.parametrize(
+    ("method", "content", "status", "field"),
+    [
+        ("cancel", b"{", 400, "body"),
+        ("cancel", b"null", 400, "body"),
+        ("cancel", b"[]", 400, "body"),
+        ("cancel", b'{"reason":1}', 400, "reason"),
+        ("cancel", b'{"status":"CANCELLED"}', 422, "status"),
+        ("cancel", b'{"reason":"' + b"x" * 501 + b'"}', 422, "reason"),
+        ("reschedule", b"null", 400, "body"),
+        ("reschedule", b"{}", 422, "starts_at"),
+        ("reschedule", b'{"starts_at":17,"ends_at":"2026-12-01T06:30:00Z"}', 400, "starts_at"),
+        (
+            "reschedule",
+            b'{"starts_at":"2026-12-01T05:00:00Z","ends_at":"2026-12-01T06:30:00Z","group_id":null}',
+            422,
+            "group_id",
+        ),
+    ],
+)
+async def test_reject_invalid_lifecycle_bodies(
+    client: tuple[httpx.AsyncClient, AppContext],
+    method: str,
+    content: bytes,
+    status: int,
+    field: str,
+) -> None:
+    http, _ = client
+    lesson = "/lessons/3d000000-0000-4000-8000-000000000001"
+    response = await http.post(
+        f"{lesson}/{method}", content=content, headers={"content-type": "application/json"}
+    )
+    assert response.status_code == status, response.text
+    error = response.json()["error"]
+    if status == 400:
+        assert error["code"] == "BAD_REQUEST"
+        assert field in [item["field"] for item in error["details"]["errors"]]
+    else:
+        assert error["code"] == "VALIDATION_ERROR"
+        assert field in error["details"]["fields"]

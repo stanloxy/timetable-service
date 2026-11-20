@@ -18,6 +18,7 @@ from app.errors import install_error_handlers
 from app.jobs import JobRegistry, run_periodically
 from app.maintenance.reset import restore_seed
 from app.maintenance.seed import read_all
+from app.services.lessons import LessonService
 from app.settings import Settings, get_settings
 
 log = logging.getLogger(__name__)
@@ -37,8 +38,11 @@ def build_context(settings: Settings, people_client: PeopleClient) -> AppContext
         jobs=JobRegistry(),
     )
 
-    # ---> точка расширения: регистрация фоновых задач, например
-    # context.jobs.register("<job-name>", <корутина, возвращающая int>)
+    async def sweep_lesson_statuses() -> int:
+        return await LessonService(context.session_factory).start_due_lessons(clock=context.clock)
+
+    context.jobs.register("lesson-status-sweeper", sweep_lesson_statuses)
+
     async def reset_state() -> None:
         data = read_all()
         async with session_scope(context.session_factory) as session:

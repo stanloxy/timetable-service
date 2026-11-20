@@ -1,29 +1,25 @@
-import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.clock import AdjustableClock
 from app.db.models import Group, Lesson
 from app.enums.lessons import LessonFormat
+from app.schemas.lessons import LessonPatch
 from app.services.exceptions.lessons import LessonConflictError, LessonValidationError
 from app.services.lesson_results import LessonWarning
 from app.services.lesson_rules import LessonCandidate
-from app.services.lessons import LessonChanges, LessonService
-from tests.integration.db.test_concurrency import wait_for_database_lock
+from app.services.lessons import LessonService
+from tests.integration.db.helpers import AbortWriteCommit, run_write_race
 from tests.unit.test_lesson_reference_data import FakePeople
 
 _START = datetime(2026, 12, 14, 5, tzinfo=UTC)
 Write = Callable[[LessonService], Awaitable[tuple[Lesson, list[LessonWarning]]]]
-
-
-class AbortEditCommit(RuntimeError):
-    """Прервать PATCH после отправки UPDATE и до commit."""
 
 
 @pytest.fixture
@@ -70,54 +66,16 @@ async def committed_lessons(
 async def _race(
     engine: AsyncEngine, first: Write, second: Write, *, abort: bool = False
 ) -> tuple[Lesson | BaseException, Lesson | BaseException]:
-    flushed = asyncio.Event()
-    release = asyncio.Event()
+    async def save(operation: Write, service: LessonService) -> Lesson:
+        lesson, _ = await operation(service)
+        return lesson
 
-    class PausedCommitSession(AsyncSession):
-        async def commit(self) -> None:
-            await self.flush()
-            flushed.set()
-            await release.wait()
-            if abort:
-                raise AbortEditCommit
-            await super().commit()
-
-    async def write(operation: Write, service: LessonService) -> Lesson:
-        saved, _ = await operation(service)
-        return saved
-
-    async with engine.connect() as first_conn, engine.connect() as second_conn:
-        first_pid = await first_conn.scalar(text("SELECT pg_backend_pid()"))
-        second_pid = await second_conn.scalar(text("SELECT pg_backend_pid()"))
-        assert isinstance(first_pid, int)
-        assert isinstance(second_pid, int)
-        assert first_pid != second_pid
-        await first_conn.commit()
-        await second_conn.commit()
-        first_service = LessonService(
-            async_sessionmaker[AsyncSession](
-                first_conn, class_=PausedCommitSession, expire_on_commit=False
-            )
-        )
-        second_service = LessonService(async_sessionmaker(second_conn, expire_on_commit=False))
-
-        winner = asyncio.create_task(write(first, first_service))
-        contender = None
-        try:
-            await asyncio.wait_for(flushed.wait(), timeout=5)
-            contender = asyncio.create_task(write(second, second_service))
-            await wait_for_database_lock(engine, second_pid, first_pid)
-            release.set()
-            first_result, second_result = await asyncio.wait_for(
-                asyncio.gather(winner, contender, return_exceptions=True), timeout=5
-            )
-            return first_result, second_result
-        finally:
-            for task in (winner, contender):
-                if task is not None:
-                    if not task.done():
-                        task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
+    return await run_write_race(
+        engine,
+        lambda service: save(first, service),
+        lambda service: save(second, service),
+        abort=abort,
+    )
 
 
 async def _read(engine: AsyncEngine, lesson_id: UUID) -> Lesson:
@@ -200,7 +158,7 @@ async def test_create_waits_for_the_released_resource(
     edit_result, create_result = await _race(db_engine, edit, create, abort=abort)
     saved = await _read(db_engine, edited.id)
     if abort:
-        assert isinstance(edit_result, AbortEditCommit)
+        assert isinstance(edit_result, AbortWriteCommit)
         _assert_instructor_conflict(create_result, edited)
         assert saved.instructor_id == edited.instructor_id
     else:
@@ -221,7 +179,7 @@ async def test_two_edits_apply_to_the_latest_version(
     first_end = _START + timedelta(minutes=90)
     last_end = _START + timedelta(minutes=45)
     new_instructor = uuid4()
-    changes: dict[str, LessonChanges] = {
+    changes: dict[str, LessonPatch] = {
         "different_field": {"instructor_id": new_instructor},
         "same_field": {"ends_at": last_end},
         "invalid": {"ends_at": _START},

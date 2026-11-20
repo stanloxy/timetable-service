@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Required
 from uuid import UUID
 
 from pydantic import (
@@ -61,6 +61,21 @@ class LessonPatch(TypedDict, total=False):
     format: InputLessonFormat
     starts_at: IsoDateTime
     ends_at: IsoDateTime
+
+
+@with_config(ConfigDict(extra="forbid"))
+class LessonReschedule(TypedDict, total=False):
+    instructor_id: UUID4
+    classroom_id: UUID4 | None
+    format: InputLessonFormat
+    starts_at: Required[IsoDateTime]
+    ends_at: Required[IsoDateTime]
+
+
+class LessonCancel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=500)
 
 
 def require_patch_fields(value: object) -> object:

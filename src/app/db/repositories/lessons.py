@@ -1,25 +1,15 @@
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from datetime import datetime
 from hashlib import blake2b
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Select, func, literal, or_, select, text, true
+from sqlalchemy import BigInteger, Select, func, literal, or_, select, text, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from app.db.lesson_filters import LessonFilters
 from app.db.models import Lesson
 from app.enums.lessons import ACTIVE_LESSON_STATUSES, LessonStatus
-
-
-@dataclass(frozen=True)
-class LessonFilters:
-    group_id: UUID | None
-    instructor_id: UUID | None
-    classroom_id: UUID | None
-    status: LessonStatus | None
-    starts_from: datetime | None
-    starts_before: datetime | None
 
 
 def _active_overlaps(
@@ -126,6 +116,24 @@ class LessonRepository:
             Lesson.instructor_id == instructor_id
         )
         return (await self._session.scalars(query)).all()
+
+    async def start_due_lessons(self, now: datetime) -> int:
+        due = (
+            select(Lesson.id)
+            .where(Lesson.status == LessonStatus.CONFIRMED, Lesson.starts_at <= now)
+            .order_by(Lesson.id)
+            .with_for_update()
+            .cte("due_lessons")
+        )
+        started = (
+            update(Lesson)
+            .where(Lesson.id == due.c.id)
+            .values(status=LessonStatus.IN_PROGRESS, updated_at=now)
+            .returning(Lesson.id)
+            .cte("started_lessons")
+        )
+        result = await self._session.execute(select(func.count()).select_from(started))
+        return result.scalar_one()
 
     def add(self, lesson: Lesson) -> None:
         self._session.add(lesson)

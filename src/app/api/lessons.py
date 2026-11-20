@@ -1,19 +1,22 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from pydantic import UUID4, BeforeValidator
 
 from app.api.responses import error_responses
 from app.context import get_context
+from app.db.lesson_filters import LessonFilters
 from app.db.models import Lesson
-from app.db.repositories.lessons import LessonFilters
+from app.errors import ApiError
 from app.schemas.errors import ErrorBody
 from app.schemas.lessons import (
+    LessonCancel,
     LessonCreate,
     LessonListQuery,
     LessonPage,
     LessonPatch,
+    LessonReschedule,
     LessonResponse,
     LessonValidationResult,
     LessonWithWarnings,
@@ -132,3 +135,69 @@ async def edit_lesson(
         lesson_id, body, people=context.people_client, clock=context.clock
     )
     return _with_warnings(lesson, warnings)
+
+
+async def _reject_json_null(request: Request) -> None:
+    # FastAPI передаёт JSON null в проверку тела как его отсутствие.
+    if (await request.body()).strip() == b"null":
+        raise ApiError(
+            400,
+            "BAD_REQUEST",
+            "Невалидный запрос",
+            {"errors": [{"field": "body", "type": "dict_type"}]},
+        )
+
+
+@router.post(
+    "/{lesson_id}/confirm",
+    response_model=LessonResponse,
+    responses=error_responses(404, 409),
+)
+async def confirm_lesson(lesson_id: UUID4, request: Request) -> LessonResponse:
+    context = get_context(request)
+    lesson = await LessonService(context.session_factory).confirm(lesson_id, clock=context.clock)
+    return LessonResponse.model_validate(lesson)
+
+
+@router.post(
+    "/{lesson_id}/cancel",
+    response_model=LessonResponse,
+    responses=error_responses(400, 404, 409, 422),
+    dependencies=[Depends(_reject_json_null)],
+)
+async def cancel_lesson(
+    lesson_id: UUID4, request: Request, body: LessonCancel | None = None
+) -> LessonResponse:
+    context = get_context(request)
+    lesson = await LessonService(context.session_factory).cancel(
+        lesson_id, reason=body.reason if body is not None else None, clock=context.clock
+    )
+    return LessonResponse.model_validate(lesson)
+
+
+@router.post(
+    "/{lesson_id}/reschedule",
+    status_code=201,
+    response_model=LessonWithWarnings,
+    responses=error_responses(400, 404, 409, 422, 502, 504),
+    dependencies=[Depends(_reject_json_null)],
+)
+async def reschedule_lesson(
+    lesson_id: UUID4, body: Annotated[LessonReschedule, Body()], request: Request
+) -> LessonWithWarnings:
+    context = get_context(request)
+    lesson, warnings = await LessonService(context.session_factory).reschedule(
+        lesson_id, body, people=context.people_client, clock=context.clock
+    )
+    return _with_warnings(lesson, warnings)
+
+
+@router.post(
+    "/{lesson_id}/complete",
+    response_model=LessonResponse,
+    responses=error_responses(404, 409),
+)
+async def complete_lesson(lesson_id: UUID4, request: Request) -> LessonResponse:
+    context = get_context(request)
+    lesson = await LessonService(context.session_factory).complete(lesson_id, clock=context.clock)
+    return LessonResponse.model_validate(lesson)
