@@ -3,11 +3,7 @@
 # (`${VAR:-default}`), .env.example — справочник для локальных переопределений.
 # Требования: Docker Compose v2.20+ (depends_on.required), buildx 0.17+ (BuildKit для сборки); `just doctor`.
 #
-# ВЫБОР БРОКЕРА. По умолчанию поднимается RabbitMQ; Kafka лежит под профилем `kafka`.
-# Чтобы работать с Kafka, в этом файле:
-#   1) в x-app-env замените значения по умолчанию: BROKER → kafka, BROKER_URL → kafka:9092;
-#   2) перенесите строку `profiles: ["kafka"]` из сервиса kafka в сервис rabbitmq как `profiles: ["rabbitmq"]`.
-# Тогда `docker compose up --build` (так запускает проверка) поднимет только Kafka.
+# Приложение использует RabbitMQ. Kafka сохранена под отдельным профилем каркаса.
 name: timetable-service
 
 x-app-env: &app-env
@@ -34,10 +30,7 @@ services:
       people-stub:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
-        required: false
-      kafka:
-        condition: service_healthy
+        condition: service_started
         required: false
     healthcheck:
       # Liveness, не readiness: контейнер считается здоровым, пока процесс отвечает.

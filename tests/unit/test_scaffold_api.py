@@ -1,12 +1,15 @@
 """Служебные эндпоинты каркаса без БД и брокера: формат ошибок, тестовый режим, часы, задачи."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
+from app.api import health
 from app.broker import UnconfiguredBrokerProbe
 from app.clients.people import PeopleClient
 from app.clock import AdjustableClock
@@ -74,6 +77,56 @@ async def test_ready_is_degraded_without_dependencies(
     response = await http.get("/health/ready")
     assert response.status_code == 503
     assert response.json() == {"status": "degraded", "db": "fail", "broker": "fail"}
+
+
+@pytest.mark.parametrize(
+    ("db_ok", "broker_ok"), [(True, True), (True, False), (False, True), (False, False)]
+)
+async def test_ready_reports_each_dependency(
+    client: tuple[httpx.AsyncClient, AppContext],
+    monkeypatch: pytest.MonkeyPatch,
+    db_ok: bool,
+    broker_ok: bool,
+) -> None:
+    http, context = client
+    monkeypatch.setattr(health, "check_database", AsyncMock(return_value=db_ok))
+    monkeypatch.setattr(context.broker_probe, "ping", AsyncMock(return_value=broker_ok))
+    response = await http.get("/health/ready")
+    assert response.status_code == (200 if db_ok and broker_ok else 503)
+    assert response.json() == {
+        "status": "ok" if db_ok and broker_ok else "degraded",
+        "db": "ok" if db_ok else "fail",
+        "broker": "ok" if broker_ok else "fail",
+    }
+
+
+async def test_broker_probe_timeout_preserves_database_status(
+    client: tuple[httpx.AsyncClient, AppContext], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    http, context = client
+    broker_started = asyncio.Event()
+    probe_cancelled = asyncio.Event()
+
+    async def check_database(_engine: object) -> bool:
+        # The database result is available only if both probes run concurrently.
+        await broker_started.wait()
+        return True
+
+    async def hang() -> bool:
+        broker_started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            probe_cancelled.set()
+        return True
+
+    monkeypatch.setattr(health, "READINESS_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(health, "check_database", check_database)
+    monkeypatch.setattr(context.broker_probe, "ping", hang)
+    response = await http.get("/health/ready")
+    assert response.status_code == 503
+    assert response.json() == {"status": "degraded", "db": "ok", "broker": "fail"}
+    assert probe_cancelled.is_set()
 
 
 async def test_unknown_route_uses_platform_error_format(

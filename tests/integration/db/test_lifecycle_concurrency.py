@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.clock import AdjustableClock
 from app.db.models import Group, Lesson
 from app.enums.lessons import LessonFormat, LessonStatus
+from app.schemas.lesson_events import LessonRescheduledPayload, PublishedLessonEvent
 from app.schemas.lessons import LessonReschedule
 from app.services.exceptions.lessons import (
     LessonConflictError,
@@ -97,6 +98,73 @@ async def _confirm_only_due_lesson(
     await LessonService(async_sessionmaker(engine, expire_on_commit=False)).confirm(
         lesson.id, clock=clock
     )
+
+
+@pytest.mark.parametrize(
+    ("action", "target"),
+    [
+        ("confirm", LessonStatus.CONFIRMED),
+        ("cancel", LessonStatus.CANCELLED),
+        ("reschedule", LessonStatus.RESCHEDULED),
+    ],
+)
+@pytest.mark.parametrize("abort", [False, True])
+async def test_lifecycle_event_requires_commit(
+    db_engine: AsyncEngine,
+    racing_lessons: tuple[Lesson, Lesson],
+    clock: AdjustableClock,
+    action: str,
+    target: LessonStatus,
+    abort: bool,
+) -> None:
+    original, _ = racing_lessons
+    events: list[PublishedLessonEvent] = []
+
+    class CheckingPublisher:
+        async def publish(self, event: PublishedLessonEvent) -> None:
+            # These reads use an independent session while the publisher is running.
+            assert (await _read(db_engine, original.id)).status == target
+            if isinstance(event.payload, LessonRescheduledPayload):
+                successor = await _read(db_engine, event.payload.rescheduled_to_id)
+                assert successor.status == LessonStatus.PLANNED
+                assert successor.rescheduled_from_id == original.id
+            events.append(event)
+
+    class FailingCommitSession(AsyncSession):
+        async def commit(self) -> None:
+            await self.flush()
+            raise AbortWriteCommit
+
+    session_class = FailingCommitSession if abort else AsyncSession
+    sessions = async_sessionmaker[AsyncSession](
+        db_engine, class_=session_class, expire_on_commit=False
+    )
+    service = LessonService(sessions, event_publisher=CheckingPublisher())
+
+    async def transition() -> None:
+        if action == "confirm":
+            await service.confirm(original.id, clock=clock)
+        elif action == "cancel":
+            await service.cancel(original.id, reason=None, clock=clock)
+        else:
+            await service.reschedule(
+                original.id, _NEW_INTERVAL, people=FakePeople(delay=0), clock=clock
+            )
+
+    if abort:
+        with pytest.raises(AbortWriteCommit):
+            await transition()
+        assert events == []
+        saved = await _read(db_engine, original.id)
+        assert saved.status == LessonStatus.PLANNED
+        assert saved.updated_at == original.updated_at
+        assert await _successors(db_engine, original.id) == []
+    else:
+        await transition()
+        with pytest.raises(LessonTransitionForbiddenError):
+            await transition()
+        assert len(events) == 1
+        assert events[0].payload.lesson_id == original.id
 
 
 @pytest.mark.parametrize("abort", [False, True])

@@ -14,6 +14,13 @@ from app.db.repositories.groups import GroupRepository
 from app.db.repositories.lessons import LessonRepository
 from app.db.session import session_scope
 from app.enums.lessons import LessonStatus
+from app.schemas.lesson_events import (
+    LessonCancelledPayload,
+    LessonConfirmedPayload,
+    LessonEvent,
+    LessonInterval,
+    LessonRescheduledPayload,
+)
 from app.services.exceptions.lessons import (
     LessonConflictError,
     LessonNotEditableError,
@@ -26,6 +33,7 @@ from app.services.lesson_results import LessonValidation, LessonWarning
 from app.services.lesson_rules import LessonCandidate, check_lesson
 
 if TYPE_CHECKING:
+    from app.broker import EventPublisher
     from app.schemas.lessons import LessonPatch, LessonReschedule
 
 
@@ -82,8 +90,11 @@ class LessonService:
     def __init__(
         self,
         session_factory: async_sessionmaker[AsyncSession],
+        *,
+        event_publisher: EventPublisher | None = None,
     ) -> None:
         self._session_factory = session_factory
+        self._event_publisher = event_publisher
         self.lesson_repo: type[LessonRepository] = LessonRepository
 
     async def get_by_id(self, lesson_id: UUID) -> Lesson:
@@ -153,6 +164,21 @@ class LessonService:
             )
             lesson.status = LessonStatus.CONFIRMED
             lesson.updated_at = clock.now()
+            event = LessonEvent[LessonConfirmedPayload](
+                event_type="LessonConfirmed",
+                occurred_at=lesson.updated_at,
+                payload=LessonConfirmedPayload(
+                    lesson_id=lesson.id,
+                    group_id=lesson.group_id,
+                    instructor_id=lesson.instructor_id,
+                    classroom_id=lesson.classroom_id,
+                    format=lesson.format,
+                    starts_at=lesson.starts_at,
+                    ends_at=lesson.ends_at,
+                ),
+            )
+        if self._event_publisher is not None:
+            await self._event_publisher.publish(event)
         return lesson
 
     async def cancel(self, lesson_id: UUID, *, reason: str | None, clock: Clock) -> Lesson:
@@ -164,9 +190,25 @@ class LessonService:
                 LessonStatus.PLANNED,
                 LessonStatus.CONFIRMED,
             )
+            previous_status = lesson.status
             lesson.status = LessonStatus.CANCELLED
             lesson.cancel_reason = reason
             lesson.updated_at = clock.now()
+            event = LessonEvent[LessonCancelledPayload](
+                event_type="LessonCancelled",
+                occurred_at=lesson.updated_at,
+                payload=LessonCancelledPayload(
+                    lesson_id=lesson.id,
+                    group_id=lesson.group_id,
+                    instructor_id=lesson.instructor_id,
+                    starts_at=lesson.starts_at,
+                    ends_at=lesson.ends_at,
+                    previous_status=previous_status,
+                    reason=reason,
+                ),
+            )
+        if self._event_publisher is not None:
+            await self._event_publisher.publish(event)
         return lesson
 
     async def reschedule(
@@ -202,6 +244,20 @@ class LessonService:
             lesson.updated_at = now
             successor = _planned_lesson(candidate, now, rescheduled_from_id=lesson_id)
             lessons.add(successor)
+            event = LessonEvent[LessonRescheduledPayload](
+                event_type="LessonRescheduled",
+                occurred_at=now,
+                payload=LessonRescheduledPayload(
+                    lesson_id=lesson.id,
+                    group_id=lesson.group_id,
+                    instructor_id=lesson.instructor_id,
+                    rescheduled_to_id=successor.id,
+                    previous=LessonInterval.model_validate(lesson),
+                    new=LessonInterval.model_validate(successor),
+                ),
+            )
+        if self._event_publisher is not None:
+            await self._event_publisher.publish(event)
         return successor, warnings
 
     async def complete(self, lesson_id: UUID, *, clock: Clock) -> Lesson:

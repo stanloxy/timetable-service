@@ -1557,6 +1557,7 @@ version = "0.1.0"
 source = { editable = "." }
 default-groups = ["dev", "e2e"]
 dependencies = [
+    { name = "aio-pika" },
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
@@ -1575,7 +1576,6 @@ dev = [
     { name = "ruff" },
 ]
 e2e = [
-    { name = "aio-pika" },
     { name = "aiokafka" },
     { name = "jsonschema" },
     { name = "pyyaml" },
@@ -1586,6 +1586,7 @@ e2e = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aio-pika", specifier = ">=9.4" },
     { name = "alembic", specifier = ">=1.13" },
     { name = "asyncpg", specifier = ">=0.29" },
     { name = "fastapi", specifier = ">=0.115" },
@@ -1604,7 +1605,6 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
 ]
 e2e = [
-    { name = "aio-pika", specifier = ">=9.4" },
     { name = "aiokafka", specifier = ">=0.11" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "pyyaml", specifier = ">=6" },

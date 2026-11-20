@@ -1,15 +1,28 @@
+import json
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+import aio_pika
 import httpx
 import pytest
+import yaml
+from aio_pika.exceptions import AuthenticationError
+from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT202012
 from sqlalchemy import update
 
+from app.broker import RabbitMQBroker
 from app.clock import to_iso_z
 from app.context import AppContext
 from app.db.models import Lesson
 from app.db.session import session_scope
 from app.enums.lessons import LessonStatus
+from app.schemas.lesson_events import PublishedLessonEvent
 from tests.e2e.assignment import IDS
 from tests.e2e.contract import ContractChecker
 from tests.integration.api.test_schedule import Stub, _snapshot
@@ -27,6 +40,118 @@ _TRANSITIONS = [
     ("reschedule", LessonStatus.RESCHEDULED, {LessonStatus.PLANNED, LessonStatus.CONFIRMED}),
     ("complete", LessonStatus.COMPLETED, {LessonStatus.IN_PROGRESS}),
 ]
+
+
+@pytest.fixture(scope="module")
+def asyncapi_registry() -> Registry[bool | Mapping[str, Any]]:
+    spec_path = Path(__file__).resolve().parents[3] / "asyncapi.yaml"
+    document = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
+    resource = Resource.from_contents(document, default_specification=DRAFT202012)
+    registry: Registry[bool | Mapping[str, Any]] = Registry().with_resource(
+        "asyncapi.yaml", resource
+    )
+    return registry
+
+
+@pytest.mark.parametrize(
+    ("action", "event_type", "key_prefix"),
+    [
+        ("confirm", "LessonConfirmed", "lesson-confirmed"),
+        ("cancel", "LessonCancelled", "lesson-cancelled"),
+        ("reschedule", "LessonRescheduled", "lesson-rescheduled"),
+    ],
+)
+async def test_lifecycle_event_matches_asyncapi_and_transition(
+    schedule_api: tuple[httpx.AsyncClient, AppContext, Stub],
+    asyncapi_registry: Registry[bool | Mapping[str, Any]],
+    action: str,
+    event_type: str,
+    key_prefix: str,
+) -> None:
+    http, context, _ = schedule_api
+    if action == "cancel":
+        assert (await http.post(f"{_LESSON}/confirm")).status_code == 200
+    original = (await http.get(_LESSON)).json()
+    context.clock.freeze(_NOW)
+    events: list[PublishedLessonEvent] = []
+
+    class RecordingPublisher:
+        async def publish(self, event: PublishedLessonEvent) -> None:
+            events.append(event)
+
+    context.event_publisher = RecordingPublisher()
+    expected = {
+        "lesson_id": original["id"],
+        "group_id": original["group_id"],
+        "instructor_id": original["instructor_id"],
+    }
+    previous = {
+        field: original[field]
+        for field in ("starts_at", "ends_at", "instructor_id", "classroom_id")
+    }
+    if action == "reschedule":
+        response = await http.post(
+            f"{_LESSON}/reschedule",
+            json={
+                **_INTERVAL,
+                "instructor_id": IDS["I2"],
+                "format": "ONLINE",
+                "classroom_id": None,
+            },
+        )
+        assert response.status_code == 201, response.text
+        successor = response.json()["lesson"]
+        expected.update(
+            rescheduled_to_id=successor["id"],
+            previous=previous,
+            new={**_INTERVAL, "instructor_id": IDS["I2"], "classroom_id": None},
+        )
+    else:
+        response = await http.post(f"{_LESSON}/{action}")
+        assert response.status_code == 200, response.text
+        expected.update(_INTERVAL)
+        if action == "cancel":
+            expected.update(previous_status="CONFIRMED", reason=None)
+        else:
+            expected.update(classroom_id=original["classroom_id"], format=original["format"])
+
+    (event,) = events
+    wire = json.loads(event.model_dump_json())
+    validator = Draft202012Validator(
+        {"$ref": f"asyncapi.yaml#/components/messages/{event_type}/payload"},
+        registry=asyncapi_registry,
+        format_checker=FormatChecker(),
+    )
+    validator.validate(wire)
+    assert wire == {
+        "event_id": str(event.event_id),
+        "event_type": event_type,
+        "occurred_at": to_iso_z(_NOW),
+        "idempotency_key": f"{key_prefix}:{original['id']}",
+        "producer": "timetable-service",
+        "version": 1,
+        "payload": expected,
+    }
+    assert event.event_id.version == 4
+
+
+async def test_publication_failure_preserves_successful_http_result(
+    api_client: tuple[httpx.AsyncClient, AppContext],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    http, context = api_client
+    context.event_publisher = RabbitMQBroker("amqp://example.test/")
+    connect = AsyncMock(side_effect=AuthenticationError())
+    monkeypatch.setattr(aio_pika, "connect", connect)
+
+    response = await http.post(f"{_LESSON}/confirm")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "CONFIRMED"
+    assert (await http.get(_LESSON)).json() == response.json()
+    connect.assert_awaited_once()
+    assert sum("RabbitMQ publication not sent" in record.message for record in caplog.records) == 1
 
 
 async def test_confirm_persists_and_rejects_repeat(
