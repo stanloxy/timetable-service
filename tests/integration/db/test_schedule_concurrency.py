@@ -13,7 +13,7 @@ from app.enums.lessons import LessonFormat
 from app.services.exceptions import LessonConflictError
 from app.services.lesson_rules import LessonCandidate
 from app.services.lessons import LessonService
-from tests.integration.db.test_concurrency import wait_for_database_lock
+from tests.integration.db.helpers import wait_for_database_lock
 from tests.unit.test_lesson_reference_data import FakePeople
 
 

@@ -2,11 +2,14 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.errors.responses import error_response
+from app.clock import to_iso_z
 from app.services.exceptions.lessons import (
     ClassroomRequiredError,
     GroupNotFoundError,
     LessonConflictError,
     LessonNotEditableError,
+    LessonNotFinishedError,
+    LessonTransitionForbiddenError,
     LessonValidationError,
 )
 
@@ -38,4 +41,30 @@ def install_lesson_error_handlers(app: FastAPI) -> None:
             "LESSON_NOT_EDITABLE",
             "Изменять можно только занятие в статусе PLANNED",
             {"current_status": exc.current_status.value},
+        )
+
+    @app.exception_handler(LessonTransitionForbiddenError)
+    async def _transition_forbidden(
+        _: Request, exc: LessonTransitionForbiddenError
+    ) -> JSONResponse:
+        return error_response(
+            409,
+            "TRANSITION_FORBIDDEN",
+            "Недопустимый переход",
+            {
+                "current_status": exc.current_status.value,
+                "target_status": exc.target_status.value,
+            },
+        )
+
+    @app.exception_handler(LessonNotFinishedError)
+    async def _not_finished(_: Request, exc: LessonNotFinishedError) -> JSONResponse:
+        return error_response(
+            409,
+            "LESSON_NOT_FINISHED",
+            "Занятие ещё не закончилось",
+            {
+                "ends_at": to_iso_z(exc.ends_at, preserve_fraction=True),
+                "now": to_iso_z(exc.now, preserve_fraction=True),
+            },
         )

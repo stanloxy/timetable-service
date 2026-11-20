@@ -9,25 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from app.db.models import Group, Lesson
 from app.enums.lessons import LessonFormat, LessonStatus
-from tests.integration.db.helpers import make_successor
-
-
-async def wait_for_database_lock(
-    engine: AsyncEngine,
-    blocked_pid: int,
-    blocker_pid: int,
-) -> None:
-    """Дождаться подтверждённой PostgreSQL блокировки."""
-    async with engine.connect() as connection:
-        async with asyncio.timeout(5):
-            while True:
-                blocked = await connection.scalar(
-                    text("SELECT :blocker = ANY(pg_blocking_pids(:blocked))"),
-                    {"blocker": blocker_pid, "blocked": blocked_pid},
-                )
-                if blocked:
-                    return
-                await asyncio.sleep(0.01)
+from tests.integration.db.helpers import make_successor, wait_for_database_lock
 
 
 async def test_concurrent_successors(
