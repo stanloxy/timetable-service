@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.broker import BrokerProbe
+from app.broker import BrokerProbe, EventPublisher
 from app.clients.people import PeopleClient
 from app.clock import AdjustableClock
 from app.jobs import JobRegistry
@@ -23,6 +23,7 @@ class AppContext:
     clock: AdjustableClock
     broker_probe: BrokerProbe
     people_client: PeopleClient
+    event_publisher: EventPublisher | None = None
     jobs: JobRegistry = field(default_factory=JobRegistry)
     # POST /__test/reset: callback очистки и восстановления seed подключается в build_context.
     reset_state: Callable[[], Awaitable[None]] | None = None

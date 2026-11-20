@@ -155,7 +155,8 @@ async def _reject_json_null(request: Request) -> None:
 )
 async def confirm_lesson(lesson_id: UUID4, request: Request) -> LessonResponse:
     context = get_context(request)
-    lesson = await LessonService(context.session_factory).confirm(lesson_id, clock=context.clock)
+    service = LessonService(context.session_factory, event_publisher=context.event_publisher)
+    lesson = await service.confirm(lesson_id, clock=context.clock)
     return LessonResponse.model_validate(lesson)
 
 
@@ -169,7 +170,8 @@ async def cancel_lesson(
     lesson_id: UUID4, request: Request, body: LessonCancel | None = None
 ) -> LessonResponse:
     context = get_context(request)
-    lesson = await LessonService(context.session_factory).cancel(
+    service = LessonService(context.session_factory, event_publisher=context.event_publisher)
+    lesson = await service.cancel(
         lesson_id, reason=body.reason if body is not None else None, clock=context.clock
     )
     return LessonResponse.model_validate(lesson)
@@ -186,7 +188,8 @@ async def reschedule_lesson(
     lesson_id: UUID4, body: Annotated[LessonReschedule, Body()], request: Request
 ) -> LessonWithWarnings:
     context = get_context(request)
-    lesson, warnings = await LessonService(context.session_factory).reschedule(
+    service = LessonService(context.session_factory, event_publisher=context.event_publisher)
+    lesson, warnings = await service.reschedule(
         lesson_id, body, people=context.people_client, clock=context.clock
     )
     return _with_warnings(lesson, warnings)

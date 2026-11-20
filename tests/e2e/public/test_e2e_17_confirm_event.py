@@ -69,6 +69,6 @@ async def test_confirm_publishes_exactly_one_event(
     details = contract.assert_error(repeated, 409, "TRANSITION_FORBIDDEN")
     assert details == {"current_status": "CONFIRMED", "target_status": "CONFIRMED"}
 
-    assert await broker.consume(timeout_seconds=3.0) == [], (
-        "после отклонённого confirm событий быть не должно"
-    )
+    after_repeat = await broker.consume(timeout_seconds=3.0, max_messages=1)
+    record.actual(f"{record.record.actual}; событий после повтора: {len(after_repeat)}")
+    assert after_repeat == [], "после отклонённого confirm событий быть не должно"
